@@ -1,0 +1,1352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Noble Chain - Admin Console</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Using CDN for rapid local/dev preview. Replace with built CSS for production. -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card-shadow { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .tab-btn { transition: all 0.2s ease; }
+        .tab-btn.active { background: #000000; color: #ffffff; }
+        .balance-input { transition: all 0.2s ease; }
+        .balance-input:focus { border-color: #000000; box-shadow: 0 0 0 3px rgba(0,0,0,0.1); }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body class="bg-gray-50 text-black min-h-screen overflow-x-hidden">
+    <!-- Header -->
+    <header class="bg-white border-b border-gray-100 px-4 py-3 sticky top-0 z-40">
+        <div class="flex items-center justify-between max-w-6xl mx-auto">
+            <div class="flex items-center space-x-3">
+                <div class="w-8 h-8 bg-black rounded-full flex items-center justify-center">
+                    <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"></path>
+                    </svg>
+                </div>
+                <h1 class="text-xl font-semibold">Admin Console</h1>
+            </div>
+            <div class="flex items-center space-x-3">
+                <div class="text-sm text-gray-600">
+                    Logged in as: <span class="font-semibold">Admin</span>
+                    <span id="adminOnlineBadge" class="ml-3 inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-gray-200 text-gray-700">Offline</span>
+                </div>
+                <div class="text-sm text-gray-600">
+                    DB: <span id="dbStatus" class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-800">Disconnected</span>
+                </div>
+                <button id="connectBtn" onclick="showConnectModal()" class="bg-black text-white px-4 py-2 rounded-lg text-sm font-medium">
+                    Connect DB
+                </button>
+                <button id="createDevTablesBtn" onclick="showDevSqlModal()" title="Create dev tables (shows SQL to run in Supabase console)" class="bg-yellow-50 text-yellow-800 px-3 py-2 rounded-lg text-sm font-medium">Create Dev Tables</button>
+                <button id="pullBtn" onclick="doPull()" class="bg-white border border-gray-200 px-3 py-2 rounded-lg text-sm font-medium">Pull</button>
+                <button id="pushBtn" onclick="doPush()" class="bg-white border border-gray-200 px-3 py-2 rounded-lg text-sm font-medium">Push</button>
+                <button id="disconnectDbBtn" onclick="disconnectSupabase()" class="bg-gray-100 text-black px-3 py-2 rounded-lg text-sm font-medium">Disconnect</button>
+                <div class="flex items-center space-x-2">
+                    <label class="text-xs text-gray-500">Auto-sync</label>
+                    <input id="autoSyncToggle" type="checkbox" onchange="toggleAutoSync(this.checked)" />
+                </div>
+                <div class="text-xs text-gray-500 ml-3">Last sync: <span id="lastSync">Never</span></div>
+                <button onclick="logoutAdmin()" class="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-medium">
+                    Logout
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-6xl mx-auto px-4 py-6">
+        <!-- Tab Navigation -->
+        <div class="bg-white rounded-2xl p-4 mb-6 card-shadow">
+            <div class="flex space-x-2 overflow-x-auto">
+                <button onclick="switchTab(event,'users')" class="tab-btn active px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap">
+                    Users
+                </button>
+                <button onclick="switchTab(event,'transactions')" class="tab-btn px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap bg-gray-100">
+                    Transactions
+                </button>
+                <button onclick="switchTab(event,'support')" class="tab-btn px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap bg-gray-100">
+                    Support Chats
+                </button>
+                <button onclick="switchTab(event,'logs')" class="tab-btn px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap bg-gray-100">
+                    Admin Logs
+                </button>
+            </div>
+        </div>
+
+            <!-- Quick Push Panel: select records and push selected to Supabase -->
+            <div class="bg-white rounded-2xl p-6 card-shadow mb-6" id="selectPushCard">
+                <h2 class="text-lg font-semibold mb-3">Push Selected Records to Remote</h2>
+                <div class="flex items-center space-x-3 mb-4">
+                    <label class="text-sm text-gray-600">Record type</label>
+                    <select id="recordTypeSelect" class="p-2 border rounded" onchange="loadSelectableRecords()">
+                        <option value="users">Users</option>
+                        <option value="transactions">Transactions</option>
+                        <option value="support">Support Chats</option>
+                    </select>
+                    <button id="loadRecordsBtn" onclick="loadSelectableRecords()" class="bg-white border border-gray-200 px-3 py-2 rounded-lg text-sm">Load</button>
+                    <button id="pushSelectedBtn" onclick="pushSelectedRecords()" class="bg-black text-white px-3 py-2 rounded-lg text-sm" disabled>Push Selected</button>
+                    <button id="selectAllBtn" onclick="toggleSelectAll()" class="bg-gray-100 px-3 py-2 rounded-lg text-sm">Select All</button>
+                </div>
+
+                <div id="selectableList" class="max-h-48 overflow-y-auto border rounded p-2 text-sm text-gray-700">
+                    <!-- Loaded records will appear here with checkboxes -->
+                </div>
+
+                <div id="pushResults" class="mt-4 text-sm"></div>
+            </div>
+
+        <!-- Login Activity Tab -->
+        <div id="loginsTab" class="tab-content hidden">
+            <div class="bg-white rounded-2xl p-6 card-shadow">
+                <h2 class="text-lg font-semibold mb-4">User Login Activity</h2>
+                <div class="hidden md:block overflow-x-auto">
+                    <table class="w-full">
+                        <thead>
+                            <tr class="border-b border-gray-100">
+                                <th class="text-left py-3 px-2 text-sm font-medium text-gray-600">User</th>
+                                <th class="text-left py-3 px-2 text-sm font-medium text-gray-600">Email</th>
+                                <th class="text-left py-3 px-2 text-sm font-medium text-gray-600">Login Time</th>
+                                <th class="text-left py-3 px-2 text-sm font-medium text-gray-600">Device</th>
+                                <th class="text-left py-3 px-2 text-sm font-medium text-gray-600">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="loginsTableBody">
+                            <!-- Login activity will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+                <div id="loginsCardsContainer" class="md:hidden space-y-4">
+                    <!-- Login activity cards for mobile will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Users Tab -->
+        <div id="usersTab" class="tab-content">
+            <div class="bg-white rounded-2xl p-6 card-shadow mb-6">
+                <h2 class="text-lg font-semibold mb-4">Platform Statistics</h2>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div class="bg-gray-50 p-4 rounded-xl">
+                        <div class="text-2xl font-bold" id="totalUsers">0</div>
+                        <div class="text-sm text-gray-600">Total Users</div>
+                    </div>
+                    <div class="bg-gray-50 p-4 rounded-xl">
+                        <div class="text-2xl font-bold" id="totalTransactions">0</div>
+                        <div class="text-sm text-gray-600">Total Transactions</div>
+                    </div>
+                    <div class="bg-gray-50 p-4 rounded-xl">
+                        <div class="text-2xl font-bold" id="totalVolume">$0</div>
+                        <div class="text-sm text-gray-600">Total Volume</div>
+                    </div>
+                    <div class="bg-gray-50 p-4 rounded-xl">
+                        <div class="text-2xl font-bold" id="activeChats">0</div>
+                        <div class="text-sm text-gray-600">Active Chats</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-2xl p-6 card-shadow">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold">User Management</h2>
+                    <input type="text" id="userSearch" placeholder="Search users..." 
+                           class="px-3 py-2 border border-gray-200 rounded-lg text-sm">
+                </div>
+                <div class="hidden md:block overflow-x-auto">
+                    <table class="w-full">
+                        <thead>
+                            <tr class="border-b border-gray-100">
+                                <th class="text-left py-3 px-2 text-sm font-medium text-gray-600">User</th>
+                                <th class="text-left py-3 px-2 text-sm font-medium text-gray-600">Email</th>
+                                <th class="text-left py-3 px-2 text-sm font-medium text-gray-600">Balance</th>
+                                <th class="text-left py-3 px-2 text-sm font-medium text-gray-600">Assets</th>
+                                <th class="text-left py-3 px-2 text-sm font-medium text-gray-600">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usersTableBody">
+                            <!-- Users will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+                <div id="usersCardsContainer" class="md:hidden space-y-4">
+                    <!-- User cards for mobile will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Transactions Tab -->
+        <div id="transactionsTab" class="tab-content hidden">
+            <div class="bg-white rounded-2xl p-6 card-shadow">
+                <h2 class="text-lg font-semibold mb-4">All Transactions</h2>
+                <div class="hidden md:block overflow-x-auto">
+                    <table class="w-full">
+                        <thead>
+                            <tr class="border-b border-gray-100">
+                                <th class="text-left py-3 px-2 text-sm font-medium text-gray-600">User</th>
+                                <th class="text-left py-3 px-2 text-sm font-medium text-gray-600">Type</th>
+                                <th class="text-left py-3 px-2 text-sm font-medium text-gray-600">Asset</th>
+                                <th class="text-left py-3 px-2 text-sm font-medium text-gray-600">Amount</th>
+                                <th class="text-left py-3 px-2 text-sm font-medium text-gray-600">Date</th>
+                            </tr>
+                        </thead>
+                        <tbody id="transactionsTableBody">
+                            <!-- Transactions will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+                <div id="transactionsCardsContainer" class="md:hidden space-y-4">
+                    <!-- Transaction cards for mobile will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Support Tab -->
+        <div id="supportTab" class="tab-content hidden">
+            <div class="bg-white rounded-2xl p-6 card-shadow">
+                <h2 class="text-lg font-semibold mb-4">Support Chats</h2>
+                <div id="supportChats">
+                    <!-- Support chats will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Logs Tab -->
+        <div id="logsTab" class="tab-content hidden">
+            <div class="bg-white rounded-2xl p-6 card-shadow">
+                <h2 class="text-lg font-semibold mb-4">Admin Action Logs</h2>
+                <div class="hidden md:block overflow-x-auto">
+                    <table class="w-full">
+                        <thead>
+                            <tr class="border-b border-gray-100">
+                                <th class="text-left py-3 px-2 text-sm font-medium text-gray-600">Action</th>
+                                <th class="text-left py-3 px-2 text-sm font-medium text-gray-600">Details</th>
+                                <th class="text-left py-3 px-2 text-sm font-medium text-gray-600">Timestamp</th>
+                                <th class="text-left py-3 px-2 text-sm font-medium text-gray-600">IP</th>
+                            </tr>
+                        </thead>
+                        <tbody id="logsTableBody">
+                            <!-- Logs will be populated by JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+                <div id="logsCardsContainer" class="md:hidden space-y-4">
+                    <!-- Admin logs cards for mobile will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Balance Edit Modal -->
+    <div id="balanceModal" class="fixed inset-0 bg-black bg-opacity-50 z-50 hidden">
+        <div class="flex items-center justify-center min-h-screen p-4">
+            <div class="bg-white rounded-2xl p-6 w-full max-w-sm">
+                <div id="balanceModalContent">
+                    <!-- Modal content will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="main.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js/dist/umd/supabase.min.js"></script>
+    <script>
+        class AdminConsole {
+            constructor() {
+                this.currentTab = 'users';
+                this.selectedUser = null;
+                this.init();
+            }
+
+            // Send an admin message into a user's support chat
+            sendAdminMessage(userId) {
+                try {
+                    const el = document.getElementById(`replyInput_${userId}`);
+                    if (!el) return alert('Reply input not found');
+                    const text = el.value && el.value.trim();
+                    if (!text) return alert('Please type a message');
+
+                    // Use nobleChain API to record the admin message for that user
+                    window.nobleChain.sendSupportMessage(text, true, 'admin', userId);
+
+                    // Clear input and refresh the chat modal content
+                    el.value = '';
+                    // Re-open the chat view to refresh messages
+                    this.viewChat(userId);
+                    this.updateStats();
+                } catch (err) {
+                    console.error(err);
+                    alert('Failed to send admin message: ' + (err.message || err));
+                }
+            }
+
+            init() {
+                console.log('AdminConsole.init() starting');
+                // Check if admin is logged in
+                const adminSession = localStorage.getItem('noblechain_admin_session');
+                if (!adminSession) {
+                    alert('Admin access required');
+                    window.location.href = 'index.html';
+                    return;
+                }
+
+                // Parse and validate admin session
+                try {
+                    const sessionData = JSON.parse(adminSession);
+                    if (!sessionData.adminId || !sessionData.loginTime) {
+                        throw new Error('Invalid admin session');
+                    }
+                    
+                    // Check if session is still valid (24 hours)
+                    if (Date.now() - sessionData.loginTime > 86400000) {
+                        localStorage.removeItem('noblechain_admin_session');
+                        alert('Admin session expired');
+                        window.location.href = 'index.html';
+                        return;
+                    }
+                } catch (error) {
+                    localStorage.removeItem('noblechain_admin_session');
+                    alert('Invalid admin session');
+                    window.location.href = 'index.html';
+                    return;
+                }
+
+                // Mark admin presence as online while console is open
+                try { localStorage.setItem('noblechain_admin_online','true'); } catch(e){}
+                window.addEventListener('beforeunload', () => { try { localStorage.setItem('noblechain_admin_online','false'); } catch(e){} });
+
+                // Update admin online badge and listen for cross-tab changes
+                this.updateAdminBadge();
+                window.addEventListener('storage', (e) => {
+                    if (e.key === 'noblechain_admin_online') this.updateAdminBadge();
+                });
+
+                this.updateStats();
+                this.renderUsers();
+                this.bindEvents();
+            }
+
+            updateStats() {
+                const users = window.nobleChain.getAllUsers();
+                const transactions = window.nobleChain.getAllTransactions();
+                const supportChats = window.nobleChain.getSupportChats();
+                
+                // Calculate total volume
+                let totalVolume = 0;
+                transactions.forEach(tx => {
+                    if (tx.type === 'buy' || tx.type === 'sell') {
+                        totalVolume += tx.amount * (window.nobleChain.marketData[tx.asset]?.price || 0);
+                    }
+                });
+
+                document.getElementById('totalUsers').textContent = users.length;
+                document.getElementById('totalTransactions').textContent = transactions.length;
+                document.getElementById('totalVolume').textContent = window.nobleChain.formatCurrency(totalVolume);
+                document.getElementById('activeChats').textContent = new Set(supportChats.map(chat => chat.userId)).size;
+            }
+
+            renderUsers() {
+                const container = document.getElementById('usersTableBody');
+                const users = window.nobleChain.getAllUsers();
+                
+                if (users.length === 0) {
+                    container.innerHTML = `
+                        <tr>
+                            <td colspan="5" class="text-center py-8 text-gray-500">
+                                No users found
+                            </td>
+                        </tr>
+                    `;
+                    const usersCards = document.getElementById('usersCardsContainer');
+                    if (usersCards) {
+                        usersCards.innerHTML = `
+                            <div class="text-center py-8 text-gray-500">
+                                No users found
+                            </div>
+                        `;
+                    }
+                    return;
+                }
+
+                container.innerHTML = users.map(user => {
+                    const wallet = window.nobleChain.getWallet(user.id);
+                    const totalBalance = window.nobleChain.getTotalBalance(user.id);
+                    const assetCount = Object.keys(wallet.assets).length;
+                    
+                    return `
+                        <tr class="border-b border-gray-50">
+                            <td class="py-3 px-2">
+                                <div class="font-semibold text-sm">${user.username}</div>
+                                <div class="text-xs text-gray-500">Joined ${new Date(user.createdAt).toLocaleDateString()}</div>
+                            </td>
+                            <td class="py-3 px-2 text-sm">${user.email}</td>
+                            <td class="py-3 px-2 text-sm font-semibold">${window.nobleChain.formatCurrency(totalBalance)}</td>
+                            <td class="py-3 px-2 text-sm">${assetCount} assets</td>
+                            <td class="py-3 px-2">
+                                <div class="flex space-x-2">
+                                    <button onclick="adminConsole.editBalance('${user.id}')" 
+                                            class="text-blue-600 text-sm font-medium">
+                                        Edit Balance
+                                    </button>
+                                    <button onclick="adminConsole.viewUserDetails('${user.id}')" 
+                                            class="text-gray-600 text-sm font-medium">
+                                        View
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+
+                // Build mobile cards for users (visible under md)
+                const usersCards = document.getElementById('usersCardsContainer');
+                if (usersCards) {
+                    usersCards.innerHTML = users.map(user => {
+                        const wallet = window.nobleChain.getWallet(user.id);
+                        const totalBalance = window.nobleChain.getTotalBalance(user.id);
+                        const assetCount = Object.keys(wallet.assets).length;
+
+                        return `
+                            <div class="bg-white p-4 rounded-xl card-shadow">
+                                <div class="flex items-start justify-between mb-2">
+                                    <div>
+                                        <div class="font-semibold text-sm">${user.username}</div>
+                                        <div class="text-xs text-gray-500">Joined ${new Date(user.createdAt).toLocaleDateString()}</div>
+                                        <div class="text-sm text-gray-600">${user.email}</div>
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="text-sm font-semibold">${window.nobleChain.formatCurrency(totalBalance)}</div>
+                                        <div class="text-xs text-gray-500">${assetCount} assets</div>
+                                    </div>
+                                </div>
+                                <div class="flex space-x-3 mt-3">
+                                    <button onclick="adminConsole.editBalance('${user.id}')" class="text-blue-600 text-sm font-medium">
+                                        Edit Balance
+                                    </button>
+                                    <button onclick="adminConsole.viewUserDetails('${user.id}')" class="text-gray-600 text-sm font-medium">
+                                        View
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                }
+            }
+
+            renderTransactions() {
+                const container = document.getElementById('transactionsTableBody');
+                const transactions = window.nobleChain.getAllTransactions();
+                
+                if (transactions.length === 0) {
+                    container.innerHTML = `
+                        <tr>
+                            <td colspan="5" class="text-center py-8 text-gray-500">
+                                No transactions found
+                            </td>
+                        </tr>
+                    `;
+                    const txCards = document.getElementById('transactionsCardsContainer');
+                    if (txCards) {
+                        txCards.innerHTML = `
+                            <div class="text-center py-8 text-gray-500">
+                                No transactions found
+                            </div>
+                        `;
+                    }
+                    return;
+                }
+
+                container.innerHTML = transactions
+                    .sort((a, b) => b.timestamp - a.timestamp)
+                    .slice(0, 50)
+                    .map(tx => {
+                        const user = window.nobleChain.users.find(u => u.id === tx.userId);
+                        const username = user ? user.username : 'Unknown';
+                        
+                        return `
+                            <tr class="border-b border-gray-50">
+                                <td class="py-3 px-2 text-sm">${username}</td>
+                                <td class="py-3 px-2 text-sm capitalize">${tx.type.replace('_', ' ')}</td>
+                                <td class="py-3 px-2 text-sm">${tx.asset}</td>
+                                <td class="py-3 px-2 text-sm">${window.nobleChain.formatNumber(tx.amount)}</td>
+                                <td class="py-3 px-2 text-sm">${new Date(tx.timestamp).toLocaleDateString()}</td>
+                            </tr>
+                        `;
+                    }).join('');
+
+                // Build mobile cards for transactions
+                const txCards = document.getElementById('transactionsCardsContainer');
+                if (txCards) {
+                    txCards.innerHTML = transactions
+                        .sort((a, b) => b.timestamp - a.timestamp)
+                        .slice(0, 50)
+                        .map(tx => {
+                            const user = window.nobleChain.users.find(u => u.id === tx.userId);
+                            const username = user ? user.username : 'Unknown';
+
+                            return `
+                                <div class="bg-white p-4 rounded-xl card-shadow">
+                                    <div class="font-semibold text-sm mb-1">${username}</div>
+                                    <div class="text-sm text-gray-600">Type: ${tx.type.replace('_', ' ')}</div>
+                                    <div class="text-sm text-gray-600">Asset: ${tx.asset}</div>
+                                    <div class="text-sm text-gray-600">Amount: ${window.nobleChain.formatNumber(tx.amount)}</div>
+                                    <div class="text-xs text-gray-500 mt-2">${new Date(tx.timestamp).toLocaleDateString()}</div>
+                                </div>
+                            `;
+                        }).join('');
+                }
+            }
+
+            renderSupportChats() {
+                const container = document.getElementById('supportChats');
+                const supportChats = window.nobleChain.getSupportChats();
+                const userChats = {};
+                
+                // Group chats by user
+                supportChats.forEach(chat => {
+                    if (!userChats[chat.userId]) {
+                        userChats[chat.userId] = [];
+                    }
+                    userChats[chat.userId].push(chat);
+                });
+                
+                const userIds = Object.keys(userChats);
+                
+                if (userIds.length === 0) {
+                    container.innerHTML = `
+                        <div class="text-center py-8 text-gray-500">
+                            <p>No support chats found</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                container.innerHTML = userIds.map(userId => {
+                    const user = window.nobleChain.users.find(u => u.id === userId);
+                    const username = user ? user.username : 'Unknown User';
+                    const chats = userChats[userId];
+                    const lastMessage = chats[chats.length - 1];
+                    const unreadCount = chats.filter(chat => chat.senderType === 'user' && !chat.isAdmin).length;
+                    
+                    return `
+                        <div class="bg-gray-50 p-4 rounded-xl mb-4">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="font-semibold">${username}</div>
+                                <div class="text-xs text-gray-500">
+                                    ${new Date(lastMessage.timestamp).toLocaleDateString()}
+                                </div>
+                            </div>
+                            <div class="text-sm text-gray-600 mb-3">
+                                ${lastMessage.message.substring(0, 100)}${lastMessage.message.length > 100 ? '...' : ''}
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <div class="text-xs text-gray-500">
+                                    ${chats.length} messages
+                                </div>
+                                <div class="flex items-center space-x-2">
+                                    ${unreadCount > 0 ? `
+                                        <span class="bg-red-500 text-white text-xs px-2 py-1 rounded-full">
+                                            ${unreadCount} new
+                                        </span>
+                                    ` : ''}
+                                    <button onclick="adminConsole.viewChat('${userId}')" 
+                                            class="text-blue-600 text-sm font-medium">
+                                        View Chat
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            renderLoginActivity() {
+                const container = document.getElementById('loginsTableBody');
+                const loginHistory = window.nobleChain.loginHistory;
+                
+                if (loginHistory.length === 0) {
+                    container.innerHTML = `
+                        <tr>
+                            <td colspan="5" class="text-center py-8 text-gray-500">
+                                No login activity found
+                            </td>
+                        </tr>
+                    `;
+                    const loginsCards = document.getElementById('loginsCardsContainer');
+                    if (loginsCards) {
+                        loginsCards.innerHTML = `
+                            <div class="text-center py-8 text-gray-500">
+                                No login activity found
+                            </div>
+                        `;
+                    }
+                    return;
+                }
+
+                container.innerHTML = loginHistory
+                    .sort((a, b) => b.timestamp - a.timestamp)
+                    .slice(0, 100)
+                    .map(record => {
+                        const user = window.nobleChain.users.find(u => u.id === record.userId);
+                        const username = user ? user.username : 'Unknown';
+                        const email = user ? user.email : 'Unknown';
+                        
+                        return `
+                            <tr class="border-b border-gray-50">
+                                <td class="py-3 px-2 text-sm">${username}</td>
+                                <td class="py-3 px-2 text-sm">${email}</td>
+                                <td class="py-3 px-2 text-sm">${new Date(record.timestamp).toLocaleString()}</td>
+                                <td class="py-3 px-2 text-sm">${record.deviceInfo}</td>
+                                <td class="py-3 px-2">
+                                    <span class="px-2 py-1 rounded-full text-xs ${record.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                                        ${record.success ? 'Success' : 'Failed'}
+                                    </span>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('');
+
+                // Build mobile cards for login activity
+                const loginsCards = document.getElementById('loginsCardsContainer');
+                if (loginsCards) {
+                    loginsCards.innerHTML = loginHistory
+                        .sort((a, b) => b.timestamp - a.timestamp)
+                        .slice(0, 100)
+                        .map(record => {
+                            const user = window.nobleChain.users.find(u => u.id === record.userId);
+                            const username = user ? user.username : 'Unknown';
+                            const email = user ? user.email : 'Unknown';
+
+                            return `
+                                <div class="bg-white p-4 rounded-xl card-shadow">
+                                    <div class="flex items-center justify-between mb-2">
+                                        <div>
+                                            <div class="font-semibold text-sm">${username}</div>
+                                            <div class="text-xs text-gray-500">${email}</div>
+                                        </div>
+                                        <div class="text-xs text-gray-500">${new Date(record.timestamp).toLocaleString()}</div>
+                                    </div>
+                                    <div class="text-sm text-gray-600">Device: ${record.deviceInfo}</div>
+                                    <div class="mt-2">
+                                        <span class="px-2 py-1 rounded-full text-xs ${record.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">
+                                            ${record.success ? 'Success' : 'Failed'}
+                                        </span>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('');
+                }
+            }
+
+            renderAdminLogs() {
+                const container = document.getElementById('logsTableBody');
+                const logs = JSON.parse(localStorage.getItem('noblechain_admin_logs') || '[]');
+                
+                if (logs.length === 0) {
+                    container.innerHTML = `
+                        <tr>
+                            <td colspan="4" class="text-center py-8 text-gray-500">
+                                No admin logs found
+                            </td>
+                        </tr>
+                    `;
+                    const logsCards = document.getElementById('logsCardsContainer');
+                    if (logsCards) {
+                        logsCards.innerHTML = `
+                            <div class="text-center py-8 text-gray-500">
+                                No admin logs found
+                            </div>
+                        `;
+                    }
+                    return;
+                }
+
+                container.innerHTML = logs
+                    .sort((a, b) => b.timestamp - a.timestamp)
+                    .slice(0, 50)
+                    .map(log => `
+                        <tr class="border-b border-gray-50">
+                            <td class="py-3 px-2 text-sm capitalize">${log.action.replace('_', ' ')}</td>
+                            <td class="py-3 px-2 text-sm">
+                                ${log.details.username ? `User: ${log.details.username}<br>` : ''}
+                                ${log.details.userId ? `User ID: ${log.details.userId}<br>` : ''}
+                                Success: ${log.details.success ? 'Yes' : 'No'}
+                            </td>
+                            <td class="py-3 px-2 text-sm">${new Date(log.timestamp).toLocaleString()}</td>
+                            <td class="py-3 px-2 text-sm">${log.details.ipAddress}</td>
+                        </tr>
+                    `).join('');
+
+                // Build mobile cards for admin logs
+                const logsCards = document.getElementById('logsCardsContainer');
+                if (logsCards) {
+                    logsCards.innerHTML = logs
+                        .sort((a, b) => b.timestamp - a.timestamp)
+                        .slice(0, 50)
+                        .map(log => `
+                            <div class="bg-white p-4 rounded-xl card-shadow">
+                                <div class="font-semibold text-sm mb-1">${log.action.replace('_', ' ')}</div>
+                                <div class="text-sm text-gray-600 mb-2">
+                                    ${log.details.username ? `User: ${log.details.username}<br>` : ''}
+                                    ${log.details.userId ? `User ID: ${log.details.userId}<br>` : ''}
+                                    Success: ${log.details.success ? 'Yes' : 'No'}
+                                </div>
+                                <div class="text-xs text-gray-500">${new Date(log.timestamp).toLocaleString()}</div>
+                                <div class="text-xs text-gray-500">IP: ${log.details.ipAddress}</div>
+                            </div>
+                        `).join('');
+                }
+            }
+
+            updateAdminBadge() {
+                try {
+                    const badge = document.getElementById('adminOnlineBadge');
+                    if (!badge) return;
+                    const online = localStorage.getItem('noblechain_admin_online') === 'true';
+                    if (online) {
+                        badge.textContent = 'Online';
+                        badge.classList.remove('bg-gray-200','text-gray-700');
+                        badge.classList.add('bg-green-100','text-green-800');
+                    } else {
+                        badge.textContent = 'Offline';
+                        badge.classList.remove('bg-green-100','text-green-800');
+                        badge.classList.add('bg-gray-200','text-gray-700');
+                    }
+                } catch (err) {
+                    console.warn('Failed to update admin badge', err);
+                }
+            }
+
+            editBalance(userId) {
+                const user = window.nobleChain.users.find(u => u.id === userId);
+                const wallet = window.nobleChain.getWallet(userId);
+                
+                if (!user || !wallet) {
+                    alert('User not found');
+                    return;
+                }
+
+                const assetOptions = ['USD', ...Object.keys(wallet.assets), ...Object.keys(window.nobleChain.marketData)]
+                    .filter((asset, index, arr) => arr.indexOf(asset) === index)
+                    .map(asset => `<option value="${asset}">${asset}</option>`)
+                    .join('');
+
+                const currentBalance = wallet.dollarBalance;
+                
+                showModal('Edit User Balance', `
+                    <div class="space-y-4">
+                        <div class="bg-gray-50 p-4 rounded-xl">
+                            <div class="text-sm font-medium mb-1">User: ${user.username}</div>
+                            <div class="text-sm text-gray-600">Email: ${user.email}</div>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium mb-2">Asset</label>
+                            <select id="editAsset" class="w-full p-3 border border-gray-200 rounded-xl">
+                                ${assetOptions}
+                            </select>
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium mb-2">New Balance</label>
+                            <input type="number" id="newBalance" class="w-full p-3 border border-gray-200 rounded-xl" 
+                                   placeholder="0.00" step="0.01" value="${currentBalance}">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-sm font-medium mb-2">Reason (optional)</label>
+                            <input type="text" id="editReason" class="w-full p-3 border border-gray-200 rounded-xl" 
+                                   placeholder="Enter reason for balance adjustment">
+                        </div>
+                        
+                        <div class="flex space-x-3">
+                            <button onclick="hideModal()" class="flex-1 bg-gray-100 text-black py-3 rounded-xl font-semibold">
+                                Cancel
+                            </button>
+                            <button onclick="adminConsole.confirmBalanceEdit('${userId}')" 
+                                    class="flex-1 bg-black text-white py-3 rounded-xl font-semibold">
+                                Update Balance
+                            </button>
+                        </div>
+                    </div>
+                `);
+            }
+
+            confirmBalanceEdit(userId) {
+                const asset = document.getElementById('editAsset').value;
+                const newBalance = parseFloat(document.getElementById('newBalance').value);
+                const reason = document.getElementById('editReason').value;
+                
+                if (isNaN(newBalance) || newBalance < 0) {
+                    alert('Please enter a valid balance');
+                    return;
+                }
+
+                const wallet = window.nobleChain.getWallet(userId);
+                const oldBalance = asset === 'USD' ? wallet.dollarBalance : (wallet.assets[asset]?.balance || 0);
+                const adjustment = newBalance - oldBalance;
+
+                // Update balance
+                if (asset === 'USD') {
+                    wallet.dollarBalance = newBalance;
+                } else {
+                    if (!wallet.assets[asset]) {
+                        wallet.assets[asset] = { balance: 0, averageCost: 0 };
+                    }
+                    wallet.assets[asset].balance = newBalance;
+                }
+                
+                window.nobleChain.saveWallets();
+
+                // Create typed admin transaction (deposit/withdrawal) instead of generic admin_adjustment
+                const defaultReason = (adjustment > 0) ? 'DEPOSIT' : (adjustment < 0 ? 'WITHDRAWAL' : 'ADJUSTMENT');
+                let txType = 'adjustment';
+                if (adjustment > 0) txType = 'deposit';
+                else if (adjustment < 0) txType = 'withdrawal';
+
+                const tx = window.nobleChain.createTransaction(txType, asset, Math.abs(adjustment), reason || defaultReason, userId, {
+                    previousBalance: oldBalance,
+                    newBalance: newBalance,
+                    adjustment: adjustment,
+                    adminId: 'admin_console',
+                    reason: reason || defaultReason,
+                    originalType: 'admin_adjustment'
+                });
+
+                // Log admin action
+                this.logAdminAction('balance_adjustment', {
+                    userId: userId,
+                    asset: asset,
+                    oldBalance: oldBalance,
+                    newBalance: newBalance,
+                    adjustment: adjustment,
+                    reason: reason,
+                    timestamp: Date.now()
+                });
+
+                hideModal();
+                alert(`Balance updated successfully. Adjustment of ${window.nobleChain.formatNumber(Math.abs(adjustment))} ${asset} has been logged.`);
+                
+                this.updateStats();
+                this.renderUsers();
+            }
+
+            viewUserDetails(userId) {
+                const user = window.nobleChain.users.find(u => u.id === userId);
+                const wallet = window.nobleChain.getWallet(userId);
+                
+                showModal('User Details', `
+                    <div class="space-y-4">
+                        <div class="bg-gray-50 p-4 rounded-xl">
+                            <h3 class="font-semibold mb-2">Account Information</h3>
+                            <div class="space-y-1 text-sm">
+                                <div><span class="text-gray-600">Username:</span> ${user.username}</div>
+                                <div><span class="text-gray-600">Email:</span> ${user.email}</div>
+                                <div><span class="text-gray-600">Joined:</span> ${new Date(user.createdAt).toLocaleDateString()}</div>
+                                <div><span class="text-gray-600">Last Login:</span> ${user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'Never'}</div>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-gray-50 p-4 rounded-xl">
+                            <h3 class="font-semibold mb-2">Wallet Balance</h3>
+                            <div class="space-y-1 text-sm">
+                                <div><span class="text-gray-600">USD Balance:</span> ${window.nobleChain.formatCurrency(wallet.dollarBalance)}</div>
+                                <div><span class="text-gray-600">Total Value:</span> ${window.nobleChain.formatCurrency(window.nobleChain.getTotalBalance(userId))}</div>
+                                <div><span class="text-gray-600">Assets:</span> ${Object.keys(wallet.assets).length}</div>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-gray-50 p-4 rounded-xl">
+                            <h3 class="font-semibold mb-2">Assets</h3>
+                            <div class="space-y-1 text-sm">
+                                ${Object.entries(wallet.assets).map(([assetId, data]) => {
+                                    const marketInfo = window.nobleChain.marketData[assetId];
+                                    const value = data.balance * (marketInfo?.price || 0);
+                                    return `<div><span class="text-gray-600">${assetId}:</span> ${window.nobleChain.formatNumber(data.balance)} (${window.nobleChain.formatCurrency(value)})</div>`;
+                                }).join('')}
+                            </div>
+                        </div>
+                        
+                        <button onclick="hideModal()" class="w-full bg-black text-white py-3 rounded-xl font-semibold">
+                            Close
+                        </button>
+                    </div>
+                `);
+            }
+
+            viewChat(userId) {
+                const user = window.nobleChain.users.find(u => u.id === userId);
+                const username = user ? user.username : 'Unknown User';
+                const chats = window.nobleChain.getSupportChats(userId);
+                
+                const chatMessages = chats.map(chat => {
+                    const isUser = chat.senderType === 'user';
+                    const messageClass = `message-${chat.senderType}`;
+                    const alignmentClass = isUser ? 'ml-auto' : 'mr-auto';
+                    const senderLabel = chat.senderType === 'ai' ? 'AI Assistant' : 
+                                       chat.senderType === 'admin' ? 'Support Agent' : 'User';
+                    
+                    return `
+                        <div class="mb-4 ${isUser ? 'text-right' : 'text-left'}">
+                            <div class="inline-block max-w-xs">
+                                <div class="text-xs text-gray-500 mb-1 ${isUser ? 'text-right' : 'text-left'}">
+                                    ${senderLabel}
+                                </div>
+                                <div class="inline-block px-4 py-3 rounded-2xl ${messageClass} ${alignmentClass}">
+                                    ${chat.message}
+                                </div>
+                                <div class="text-xs text-gray-400 mt-1 ${isUser ? 'text-right' : 'text-left'}">
+                                    ${new Date(chat.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                
+                showModal(`Chat with ${username}`, `
+                    <div class="space-y-4">
+                        <div id="chatContainer_${userId}" class="bg-gray-50 rounded-xl p-4 max-h-96 overflow-y-auto">
+                            ${chatMessages}
+                        </div>
+                        <div>
+                            <textarea id="replyInput_${userId}" class="w-full p-3 border border-gray-200 rounded-xl" placeholder="Type a reply as Support Agent..."></textarea>
+                            <div class="flex mt-3">
+                                <button onclick="adminConsole.sendAdminMessage('${userId}')" class="ml-auto bg-black text-white px-4 py-2 rounded-xl font-semibold">Send</button>
+                            </div>
+                        </div>
+                        <button onclick="hideModal()" class="w-full bg-gray-100 text-black py-3 rounded-xl font-semibold">
+                            Close
+                        </button>
+                    </div>
+                `);
+            }
+
+            logAdminAction(action, details) {
+                const adminLogs = JSON.parse(localStorage.getItem('noblechain_admin_logs') || '[]');
+                adminLogs.push({
+                    id: Date.now().toString(36) + Math.random().toString(36).substr(2),
+                    action: action,
+                    details: details,
+                    timestamp: Date.now(),
+                    adminId: 'admin_console'
+                });
+                
+                // Keep only last 1000 admin logs
+                if (adminLogs.length > 1000) {
+                    adminLogs.splice(0, adminLogs.length - 1000);
+                }
+                
+                localStorage.setItem('noblechain_admin_logs', JSON.stringify(adminLogs));
+            }
+
+            bindEvents() {
+                console.log('AdminConsole.bindEvents()');
+                // User search
+                document.getElementById('userSearch').addEventListener('input', (e) => {
+                    // Simple search implementation
+                    const query = e.target.value.toLowerCase();
+                    const rows = document.querySelectorAll('#usersTableBody tr');
+                    rows.forEach(row => {
+                        const text = row.textContent.toLowerCase();
+                        row.style.display = text.includes(query) ? '' : 'none';
+                    });
+
+                    // Also filter mobile user cards
+                    const cards = document.querySelectorAll('#usersCardsContainer > div');
+                    cards.forEach(card => {
+                        const text = card.textContent.toLowerCase();
+                        card.style.display = text.includes(query) ? '' : 'none';
+                    });
+                });
+            }
+
+                
+        }
+
+        // Global functions
+        function switchTab(evt, tabName) {
+            console.log('switchTab called', tabName, evt);
+            adminConsole.currentTab = tabName;
+
+            // Update tab buttons
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('active');
+                btn.classList.add('bg-gray-100');
+            });
+            if (evt && evt.currentTarget) {
+                evt.currentTarget.classList.add('active');
+                evt.currentTarget.classList.remove('bg-gray-100');
+            } else if (evt && evt.target) {
+                evt.target.classList.add('active');
+                evt.target.classList.remove('bg-gray-100');
+            }
+            
+            // Show/hide tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.add('hidden');
+            });
+            document.getElementById(tabName + 'Tab').classList.remove('hidden');
+            
+            // Render appropriate content
+            switch(tabName) {
+                case 'users':
+                    adminConsole.renderUsers();
+                    break;
+                case 'transactions':
+                    adminConsole.renderTransactions();
+                    break;
+                case 'support':
+                    adminConsole.renderSupportChats();
+                    break;
+                case 'logs':
+                    adminConsole.renderAdminLogs();
+                    break;
+            }
+        }
+
+        function logoutAdmin() {
+                    try { localStorage.setItem('noblechain_admin_online','false'); } catch(e){}
+                    localStorage.removeItem('noblechain_admin_session');
+                    window.location.href = 'index.html';
+        }
+
+        // Supabase / Connect UI helpers (client-side scaffolding)
+        function showConnectModal(){
+            const cfg = loadSupabaseConfig() || { url: '', key: '' };
+            showModal('Connect Remote DB', `
+                <div class="space-y-4">
+                    <div>
+                        <label class="text-xs text-gray-500">Supabase URL</label>
+                        <input id="supabase_url" class="w-full p-3 border border-gray-200 rounded-xl" placeholder="https://xyz.supabase.co" value="${cfg.url || ''}" />
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500">Supabase ANON Key</label>
+                        <input id="supabase_key" class="w-full p-3 border border-gray-200 rounded-xl" placeholder="anon-key" value="${cfg.key || ''}" />
+                    </div>
+                    <div class="text-xs text-gray-500">Warning: client-side anon keys are exposed. Use for demo only.</div>
+                    <div class="flex space-x-3">
+                        <button onclick="hideModal()" class="flex-1 bg-gray-100 py-3 rounded-xl">Cancel</button>
+                        <button onclick="testSupabaseConfig()" class="flex-1 bg-white border border-gray-300 py-3 rounded-xl">Test</button>
+                        <button onclick="saveSupabaseConfig()" class="flex-1 bg-black text-white py-3 rounded-xl">Connect</button>
+                    </div>
+                </div>
+            `);
+        }
+
+        async function saveSupabaseConfig(){
+            const url = document.getElementById('supabase_url')?.value?.trim();
+            const key = document.getElementById('supabase_key')?.value?.trim();
+            if(!url || !key) return alert('Please provide both URL and ANON key');
+            const cfg = { url, key };
+            // Attempt to initialize client and run a lightweight test query to validate credentials
+            try{
+                // Temporarily set config on nobleChain for init
+                if(window.nobleChain) window.nobleChain.supabaseConfig = cfg;
+                const sb = await window.nobleChain?.initSupabaseClient();
+                let ok = false;
+                if(sb && typeof sb.from === 'function'){
+                    try{
+                        const test = await sb.from('users').select('id').limit(1);
+                        if(!test || test.error) throw (test && test.error) || new Error('Unknown error from supabase client');
+                        ok = true;
+                    }catch(e){
+                        console.warn('Client SDK test failed, will fallback to REST test', e);
+                    }
+                }
+
+                // Fallback: direct REST call to surface HTTP status/body for debugging (helps diagnose 401/RLS issues)
+                if(!ok){
+                    const restUrl = (cfg.url.replace(/\/$/, '') + '/rest/v1/users?select=id&limit=1');
+                    const r = await fetch(restUrl, { headers: { 'apikey': cfg.key, 'Authorization': 'Bearer ' + cfg.key } });
+                    const txt = await r.text().catch(()=>'');
+                    if(!r.ok) throw new Error('REST test failed: HTTP ' + r.status + ' - ' + txt);
+                }
+                // save to sessionStorage only after a successful test
+                try{ sessionStorage.setItem('noblechain_supabase', JSON.stringify(cfg)); }catch(e){ console.warn('sessionStorage error', e); }
+                updateDBStatus(true);
+                hideModal();
+                alert('Supabase config validated and saved to session.');
+            }catch(err){
+                console.error('Supabase validation failed', err);
+                // Clear any client created during validation to avoid multiple GoTrue instances
+                try{ if(window.nobleChain) { delete window.nobleChain.supabase; delete window.nobleChain.supabaseConfig; } }catch(e){}
+                updateDBStatus(false);
+                // disable auto-sync if enabled
+                try{ const t = document.getElementById('autoSyncToggle'); if(t && t.checked){ t.checked = false; toggleAutoSync(false); } }catch(e){}
+                alert('Failed to validate Supabase credentials: ' + (err.message || JSON.stringify(err)));
+            }
+        }
+
+        async function testSupabaseConfig(){
+            const url = document.getElementById('supabase_url')?.value?.trim();
+            const key = document.getElementById('supabase_key')?.value?.trim();
+            if(!url || !key) return alert('Please enter both URL and ANON key to test');
+            const cfg = { url, key };
+            try{
+                if(window.nobleChain) window.nobleChain.supabaseConfig = cfg;
+                const sb = await window.nobleChain?.initSupabaseClient();
+                if(sb && typeof sb.from === 'function'){
+                    try{
+                        const test = await sb.from('users').select('id').limit(1);
+                        if(test && test.error) throw test.error;
+                        alert('Validation succeeded — credentials appear valid (SDK).');
+                        return true;
+                    }catch(e){
+                        console.warn('SDK validation failed, will try REST endpoint', e);
+                    }
+                }
+
+                // Fallback REST check to report HTTP status/body (useful for 401/RLS debugging)
+                const restUrl = (cfg.url.replace(/\/$/, '') + '/rest/v1/users?select=id&limit=1');
+                const resp = await fetch(restUrl, { headers: { 'apikey': cfg.key, 'Authorization': 'Bearer ' + cfg.key } });
+                const body = await resp.text().catch(()=>'');
+                if(resp.ok){
+                    alert('Validation succeeded — REST access OK (HTTP ' + resp.status + ').');
+                    return true;
+                } else {
+                    alert('Validation failed — REST returned HTTP ' + resp.status + ' - ' + body);
+                    return false;
+                }
+            }catch(err){
+                console.error('Test credentials failed', err);
+                try{ if(window.nobleChain) { delete window.nobleChain.supabase; delete window.nobleChain.supabaseConfig; } }catch(e){}
+                alert('Validation failed: ' + (err.message || JSON.stringify(err)));
+                // if auto-sync was turned on, turn it off
+                try{ const t = document.getElementById('autoSyncToggle'); if(t && t.checked){ t.checked = false; toggleAutoSync(false); } }catch(e){}
+                return false;
+            }
+        }
+
+        function loadSupabaseConfig(){
+            try{
+                const raw = sessionStorage.getItem('noblechain_supabase');
+                if(!raw) return null;
+                return JSON.parse(raw);
+            }catch(e){ return null; }
+        }
+
+        function disconnectSupabase(){
+            try{ sessionStorage.removeItem('noblechain_supabase'); }catch(e){}
+            try{ delete window.nobleChain.supabaseConfig; }catch(e){}
+            updateDBStatus(false);
+            alert('Disconnected from remote DB (session cleared).');
+        }
+
+        function updateDBStatus(connected){
+            try{
+                const el = document.getElementById('dbStatus');
+                if(!el) return;
+                const cfg = loadSupabaseConfig();
+                const isConnected = typeof connected === 'boolean' ? connected : !!cfg;
+                if(isConnected){
+                    el.textContent = 'Connected';
+                    el.classList.remove('bg-red-100','text-red-800');
+                    el.classList.add('bg-green-100','text-green-800');
+                } else {
+                    el.textContent = 'Disconnected';
+                    el.classList.remove('bg-green-100','text-green-800');
+                    el.classList.add('bg-red-100','text-red-800');
+                }
+            }catch(e){ console.warn(e); }
+        }
+
+        // Initialize DB status indicator on load
+        document.addEventListener('DOMContentLoaded', () => {
+            updateDBStatus();
+        });
+
+        // Sync actions
+        async function doPull(){
+            try{
+                const btn = document.getElementById('pullBtn'); btn.disabled = true; btn.textContent = 'Pulling...';
+                if(!window.nobleChain) throw new Error('App not initialized');
+                await window.nobleChain.initSupabaseClient();
+                const res = await window.nobleChain.fetchRemoteData();
+                updateLastSync();
+                showModal('Pull Complete', `<div class="p-3">Pulled changes: ${JSON.stringify(res)}</div>`);
+            }catch(err){ console.error(err); alert('Pull failed: '+(err.message||err)); }
+            finally{ const btn = document.getElementById('pullBtn'); if(btn){ btn.disabled=false; btn.textContent='Pull'; } }
+        }
+
+        async function doPush(){
+            try{
+                const btn = document.getElementById('pushBtn'); btn.disabled = true; btn.textContent = 'Pushing...';
+                if(!window.nobleChain) throw new Error('App not initialized');
+                await window.nobleChain.initSupabaseClient();
+                const res = await window.nobleChain.pushLocalData();
+                updateLastSync();
+                showModal('Push Complete', `<div class="p-3">Push result: ${JSON.stringify(res)}</div>`);
+            }catch(err){ console.error(err); alert('Push failed: '+(err.message||err)); }
+            finally{ const btn = document.getElementById('pushBtn'); if(btn){ btn.disabled=false; btn.textContent='Push'; } }
+        }
+
+        let _autoSyncInterval = null;
+        function toggleAutoSync(enabled){
+            try{
+                if(enabled){
+                    // start auto pull every 30 seconds and subscribe to realtime
+                    doPull().catch(()=>{});
+                    _autoSyncInterval = setInterval(()=>{ doPull().catch(()=>{}); }, 30000);
+                    if(window.nobleChain && typeof window.nobleChain.subscribeToChanges === 'function'){
+                        try{ window.nobleChain.subscribeToChanges(); }catch(e){ console.warn(e); }
+                    }
+                } else {
+                    if(_autoSyncInterval) { clearInterval(_autoSyncInterval); _autoSyncInterval = null; }
+                    if(window.nobleChain && typeof window.nobleChain.unsubscribeSupabaseSubscriptions === 'function'){
+                        try{ window.nobleChain.unsubscribeSupabaseSubscriptions(); }catch(e){ console.warn(e); }
+                    }
+                }
+            }catch(e){ console.warn('toggleAutoSync', e); }
+        }
+
+        function updateLastSync(ts){
+            try{
+                const el = document.getElementById('lastSync');
+                if(!el) return;
+                const when = ts ? new Date(ts) : new Date();
+                el.textContent = when.toLocaleString();
+            }catch(e){ console.warn(e); }
+        }
+
+        // Show SQL modal for creating dev tables & permissive policies
+        function showDevSqlModal(){
+            const cfg = loadSupabaseConfig() || {};
+            const projectHost = cfg.url || '';
+            const sql = `-- SAFE: create tables if missing\n\ncreate table if not exists public.users (\n  id text primary key,\n  email text,\n  username text,\n  createdAt bigint,\n  lastLogin bigint,\n  hasLoggedInBefore boolean\n);\n\ncreate table if not exists public.wallets (\n  userId text primary key,\n  dollarBalance numeric,\n  assets jsonb\n);\n\ncreate table if not exists public.transactions (\n  id text primary key,\n  userId text,\n  type text,\n  asset text,\n  amount numeric,\n  counterparty text,\n  timestamp bigint,\n  status text,\n  metadata jsonb\n);\n\ncreate table if not exists public.support (\n  id text primary key,\n  userId text,\n  message text,\n  isAdmin boolean,\n  senderType text,\n  timestamp bigint\n);\n\n-- SAFE: enable RLS and create policy only if missing\nDO $$\nBEGIN\n  IF NOT (SELECT relrowsecurity FROM pg_class c JOIN pg_namespace n ON c.relnamespace=n.oid WHERE n.nspname='public' AND c.relname='users') THEN\n    EXECUTE 'ALTER TABLE public.users ENABLE ROW LEVEL SECURITY';\n  END IF;\n  IF NOT EXISTS (SELECT 1 FROM pg_policy p JOIN pg_class c ON p.polrelid = c.oid JOIN pg_namespace n ON c.relnamespace = n.oid WHERE n.nspname='public' AND c.relname='users' AND p.polname='anon_users_rw') THEN\n    EXECUTE 'CREATE POLICY anon_users_rw ON public.users FOR ALL USING (true) WITH CHECK (true)';\n  END IF;\nEND\n$$;\n\nDO $$\nBEGIN\n  IF NOT (SELECT relrowsecurity FROM pg_class c JOIN pg_namespace n ON c.relnamespace=n.oid WHERE n.nspname='public' AND c.relname='wallets') THEN\n    EXECUTE 'ALTER TABLE public.wallets ENABLE ROW LEVEL SECURITY';\n  END IF;\n  IF NOT EXISTS (SELECT 1 FROM pg_policy p JOIN pg_class c ON p.polrelid = c.oid JOIN pg_namespace n ON c.relnamespace = n.oid WHERE n.nspname='public' AND c.relname='wallets' AND p.polname='anon_wallets_rw') THEN\n    EXECUTE 'CREATE POLICY anon_wallets_rw ON public.wallets FOR ALL USING (true) WITH CHECK (true)';\n  END IF;\nEND\n$$;\n\nDO $$\nBEGIN\n  IF NOT (SELECT relrowsecurity FROM pg_class c JOIN pg_namespace n ON c.relnamespace=n.oid WHERE n.nspname='public' AND c.relname='transactions') THEN\n    EXECUTE 'ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY';\n  END IF;\n  IF NOT EXISTS (SELECT 1 FROM pg_policy p JOIN pg_class c ON p.polrelid = c.oid JOIN pg_namespace n ON c.relnamespace = n.oid WHERE n.nspname='public' AND c.relname='transactions' AND p.polname='anon_transactions_rw') THEN\n    EXECUTE 'CREATE POLICY anon_transactions_rw ON public.transactions FOR ALL USING (true) WITH CHECK (true)';\n  END IF;\nEND\n$$;\n\nDO $$\nBEGIN\n  IF NOT (SELECT relrowsecurity FROM pg_class c JOIN pg_namespace n ON c.relnamespace=n.oid WHERE n.nspname='public' AND c.relname='support') THEN\n    EXECUTE 'ALTER TABLE public.support ENABLE ROW LEVEL SECURITY';\n  END IF;\n  IF NOT EXISTS (SELECT 1 FROM pg_policy p JOIN pg_class c ON p.polrelid = c.oid JOIN pg_namespace n ON c.relnamespace = n.oid WHERE n.nspname='public' AND c.relname='support' AND p.polname='anon_support_rw') THEN\n    EXECUTE 'CREATE POLICY anon_support_rw ON public.support FOR ALL USING (true) WITH CHECK (true)';\n  END IF;\nEND\n$$;`;
+
+            showModal('Create Dev Tables', `
+                <div class="space-y-3">
+                    <div class="text-sm text-gray-700">This displays SQL you can run in the Supabase SQL editor to create the minimal tables and permissive dev policies. <strong>Only run in development.</strong></div>
+                    <pre id="devSqlPre" class="bg-gray-50 p-3 rounded text-xs overflow-auto" style="max-height:300px">${sql}</pre>
+                    <div class="flex space-x-2">
+                        <button onclick="copyDevSql()" class="px-3 py-2 bg-white border rounded">Copy SQL</button>
+                        <button onclick="openSupabaseConsole()" class="px-3 py-2 bg-black text-white rounded">Open Supabase Console</button>
+                        <button onclick="hideModal()" class="px-3 py-2 bg-gray-100 rounded">Close</button>
+                    </div>
+                </div>
+            `);
+        }
+
+        function copyDevSql(){
+            try{
+                const pre = document.getElementById('devSqlPre');
+                const text = pre ? pre.textContent : '';
+                navigator.clipboard.writeText(text).then(()=>{ alert('SQL copied to clipboard. Paste into Supabase SQL editor.'); }).catch(e=>{ prompt('Copy the SQL below:', text); });
+            }catch(e){ prompt('Copy the SQL below:', document.getElementById('devSqlPre')?.textContent || ''); }
+        }
+
+        function openSupabaseConsole(){
+            const cfg = loadSupabaseConfig() || {};
+            // We can't reliably open the project SQL editor from the project URL without project-ref; open Supabase projects page and instruct user.
+            window.open('https://app.supabase.com/projects', '_blank');
+            alert('Opens Supabase projects page. Open your project and paste the SQL into the SQL editor.');
+        }
+
+        // -- Selection + Push helpers for admin UI --
+        function toggleSelectAll(){
+            const boxes = Array.from(document.querySelectorAll('.record-checkbox'));
+            if(boxes.length===0) return;
+            const anyUnchecked = boxes.some(b=>!b.checked);
+            boxes.forEach(b=>b.checked = anyUnchecked);
+        }
+
+        async function loadSelectableRecords(){
+            try{
+                const type = document.getElementById('recordTypeSelect')?.value || 'users';
+                let items = [];
+                if(!window.nobleChain) return alert('App not initialized');
+                if(type==='users') items = window.nobleChain.getAllUsers() || [];
+                if(type==='transactions') items = window.nobleChain.getAllTransactions() || [];
+                if(type==='support') items = window.nobleChain.getSupportChats() || [];
+                renderSelectableList(type, items);
+            }catch(err){ console.error('loadSelectableRecords', err); alert('Failed to load records: '+(err.message||err)); }
+        }
+
+        function renderSelectableList(type, items){
+            const container = document.getElementById('selectableList');
+            container.innerHTML = '';
+            (items||[]).forEach(item => {
+                const id = item.id || item.userId || item.id;
+                const label = type==='users' ? (item.username || item.email || id) : (type==='transactions' ? `${item.type||''} ${item.amount||''} ${item.asset||''} (${item.id||id})` : (item.message? item.message.substring(0,120) : id));
+                const row = document.createElement('div');
+                row.className = 'flex items-center justify-between py-2 border-b';
+                row.innerHTML = `<label class="flex items-center space-x-3"><input type="checkbox" class="record-checkbox" data-id="${id}"/><span class="text-sm">${label}</span></label><div class="text-xs text-gray-500 ml-3">${id}</div>`;
+                container.appendChild(row);
+            });
+            document.getElementById('pushSelectedBtn').disabled = (items||[]).length===0;
+        }
+
+        async function pushSelectedRecords(){
+            try{
+                const type = document.getElementById('recordTypeSelect')?.value || 'users';
+                const boxes = Array.from(document.querySelectorAll('.record-checkbox')).filter(b=>b.checked);
+                if(boxes.length===0) return alert('Select at least one record to push');
+                const ids = boxes.map(b=>b.getAttribute('data-id'));
+                const results = [];
+                document.getElementById('pushResults').innerHTML = '<div class="text-sm text-gray-600">Pushing...</div>';
+                for(const id of ids){
+                    try{
+                        let item = null;
+                        if(type==='users') item = window.nobleChain.users.find(u=>u.id===id);
+                        if(type==='transactions') item = window.nobleChain.transactions.find(t=>t.id===id);
+                        if(type==='support') item = window.nobleChain.supportChats.find(s=>s.id===id);
+                        if(!item){ results.push({ id, error: 'Not found locally' }); continue; }
+                        let res;
+                        if(type==='users') res = await window.nobleChain.saveUserToSupabase(item);
+                        if(type==='transactions') res = await window.nobleChain.saveTransactionToSupabase(item);
+                        if(type==='support') res = await window.nobleChain.saveSupportToSupabase(item);
+                        results.push({ id, data: res });
+                    }catch(err){ results.push({ id, error: err.message || String(err) }); }
+                }
+                // render results
+                const out = document.getElementById('pushResults'); out.innerHTML = '';
+                results.forEach(r=>{
+                    const el = document.createElement('div'); el.className = 'p-2 border rounded mb-2 bg-gray-50';
+                    let statusHtml = '';
+                    if(r.error){
+                        // r.error may be a string or an object from Supabase
+                        if(typeof r.error === 'string'){
+                            statusHtml = `<div class="text-xs text-red-600">ERROR: ${r.error}</div>`;
+                        } else if(r.error && (r.error.code || r.error.message)){
+                            statusHtml = `<div class="text-xs text-red-600">ERROR: ${r.error.code || ''} ${r.error.message || ''}</div>`;
+                        } else {
+                            statusHtml = `<div class="text-xs text-red-600">ERROR: ${JSON.stringify(r.error)}</div>`;
+                        }
+                    } else {
+                        statusHtml = `<div class="text-xs text-green-600">OK</div>`;
+                    }
+                    const dataHtml = r.data ? `<pre class="text-xs text-gray-500 p-1">${JSON.stringify(r.data,null,2)}</pre>` : '';
+                    el.innerHTML = `<div class="text-sm font-medium">${r.id}</div>${statusHtml}${dataHtml}`;
+                    out.appendChild(el);
+                });
+            }catch(err){ console.error('pushSelectedRecords', err); alert('Push failed: '+(err.message||err)); }
+        }
+
+        function showModal(title, content) {
+            document.getElementById('balanceModalContent').innerHTML = `
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-lg font-semibold">${title}</h3>
+                    <button onclick="hideModal()" class="text-gray-400">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                ${content}
+            `;
+            document.getElementById('balanceModal').classList.remove('hidden');
+        }
+
+        function hideModal() {
+            document.getElementById('balanceModal').classList.add('hidden');
+        }
+
+        // Initialize Admin Console (exposed on window for inline handlers)
+        window.adminConsole = null;
+        document.addEventListener('DOMContentLoaded', () => {
+            window.adminConsole = new AdminConsole();
+        });
+    </script>
+</body>
+</html>
