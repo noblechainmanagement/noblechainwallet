@@ -8,7 +8,6 @@
     <!-- Load main application shim (replaces missing nobleChain.js/admin.js) -->
     <script src="main.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-        <link rel="stylesheet" href="resources/theme.css">
     <style>
         body { font-family: 'Inter', sans-serif; }
         .hero-bg { background: linear-gradient(135deg, #000000 0%, #1a1a1a 100%); }
@@ -56,6 +55,7 @@
             <input type="email" id="signupEmail" placeholder="Email" class="w-full p-4 border rounded-2xl">
             <input type="text" id="signupUsername" placeholder="Username" class="w-full p-4 border rounded-2xl">
             <input type="password" id="signupPassword" placeholder="Password" class="w-full p-4 border rounded-2xl">
+            <input type="password" id="signupPin" placeholder="4-digit PIN (for transactions)" class="w-full p-4 border rounded-2xl" maxlength="6" pattern="\d{4,6}">
             <button type="submit" class="w-full bg-black text-white py-4 rounded-2xl font-semibold text-lg">Continue</button>
         </form>
     </div>
@@ -73,6 +73,24 @@
             <input type="password" id="loginPassword" placeholder="Password" class="w-full p-4 border rounded-2xl">
             <button type="submit" class="w-full bg-black text-white py-4 rounded-2xl font-semibold text-lg">Sign In</button>
         </form>
+        <div class="mt-4 text-center">
+            <button onclick="showForgotPassword()" class="text-gray-600 text-sm underline">Forgot Password?</button>
+        </div>
+    </div>
+</section>
+
+<!-- Forgot Password Section -->
+<section id="forgotPasswordSection" class="hidden min-h-screen bg-white px-4 py-8">
+    <div class="max-w-sm mx-auto">
+        <div class="flex items-center mb-6">
+            <button onclick="showSection('loginSection')" class="p-2 -ml-2">Back</button>
+            <h1 class="text-2xl font-bold ml-4">Reset Password</h1>
+        </div>
+        <form id="forgotPasswordForm" class="space-y-4">
+            <input type="email" id="resetEmail" placeholder="Enter your email" class="w-full p-4 border rounded-2xl">
+            <button type="submit" class="w-full bg-black text-white py-4 rounded-2xl font-semibold text-lg">Send Reset Link</button>
+        </form>
+        <p class="text-sm text-gray-600 mt-4 text-center">We'll send you a link to reset your password.</p>
     </div>
 </section>
 
@@ -154,9 +172,15 @@
   window.showSection = showSection;
 
   // Signup handler using Supabase
-  async function handleSignup(email, password, username) {
+  async function handleSignup(email, password, username, pin) {
       if (!isAnonKeyConfigured()) {
-          alert('Signup blocked: Supabase anon key is not configured. Please add your Supabase anon/public key to index.html.');
+          alert('Signup blocked: Supabase anon key is not configured. Please add your Supabase anon key to index.html.');
+          return;
+      }
+
+      // Validate PIN
+      if (!pin || !/^\d{4,6}$/.test(pin)) {
+          alert('Please enter a valid 4-6 digit PIN for transaction security.');
           return;
       }
 
@@ -190,6 +214,15 @@
               if (!wallets[userIdKey]) {
                   wallets[userIdKey] = { userId: userIdKey, dollarBalance: 0, assets: {} };
                   localStorage.setItem('noblechain_wallets', JSON.stringify(wallets));
+              }
+              // Set up PIN for the user
+              const pins = JSON.parse(localStorage.getItem('noblechain_pins') || '{}');
+              pins[userIdKey] = { userId: userIdKey, pinHash: null, mustSetPin: true, createdAt: Date.now() };
+              localStorage.setItem('noblechain_pins', JSON.stringify(pins));
+              // Set the PIN immediately
+              if (window.NobleChain) {
+                  const nc = new window.NobleChain();
+                  nc.setTransferPin(userIdKey, pin);
               }
           } catch (e) { console.warn('Failed to persist local demo user', e); }
           localStorage.setItem('noblechain_session', JSON.stringify({ userId: window.nobleChain.currentUser.id, timestamp: Date.now() }));
@@ -286,13 +319,14 @@
       const email = document.getElementById('signupEmail').value.trim();
       const password = document.getElementById('signupPassword').value;
       const username = document.getElementById('signupUsername').value.trim();
+      const pin = document.getElementById('signupPin').value;
 
       if (!email || !password) {
           alert('Please provide an email and password.');
           return;
       }
 
-      handleSignup(email, password, username);
+      handleSignup(email, password, username, pin);
   });
 
   document.getElementById('loginForm').addEventListener('submit', (e) => {
@@ -428,6 +462,58 @@
             document.getElementById('congratsModal').classList.add('hidden');
             window.location.href = 'dashboard.html';
     });
+
+  // Forgot password functions
+  function showForgotPassword() {
+      showSection('forgotPasswordSection');
+  }
+
+  async function handleForgotPassword(email) {
+      console.log('handleForgotPassword called with email:', email);
+
+      // For demo purposes, since Supabase email may not be configured
+      // Show a message that password reset would be sent
+      alert(`Password reset requested for: ${email}\n\nIn a production app, a reset link would be sent to this email address.\n\nFor this demo, please contact support to reset your password.`);
+
+      // Try Supabase reset anyway (may fail if email not configured)
+      if (isAnonKeyConfigured()) {
+          try {
+              console.log('Attempting Supabase password reset...');
+              const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+                  redirectTo: window.location.origin + '/reset-password.html'
+              });
+
+              console.log('Supabase response:', { data, error });
+
+              if (error) {
+                  console.warn('Supabase reset failed (expected if email not configured):', error.message);
+                  // Don't show error to user since we already showed the demo message
+              } else {
+                  console.log('Supabase reset email sent successfully');
+              }
+          } catch (err) {
+              console.warn('Supabase reset error:', err);
+          }
+      }
+
+      showSection('loginSection');
+  }
+
+  // Expose functions to global scope for onclick handlers
+  window.showForgotPassword = showForgotPassword;
+
+  // Wire forgot password form
+  document.getElementById('forgotPasswordForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const email = document.getElementById('resetEmail').value.trim();
+
+      if (!email) {
+          alert('Please enter your email address.');
+          return;
+      }
+
+      handleForgotPassword(email);
+  });
 </script>
 
 </body>

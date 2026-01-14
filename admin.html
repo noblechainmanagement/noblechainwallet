@@ -70,6 +70,9 @@
                 <button onclick="switchTab(event,'support')" class="tab-btn px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap bg-gray-100">
                     Support Chats
                 </button>
+                <button onclick="switchTab(event,'buyRequests')" class="tab-btn px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap bg-gray-100">
+                    Buy Requests
+                </button>
                 <button onclick="switchTab(event,'logs')" class="tab-btn px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap bg-gray-100">
                     Admin Logs
                 </button>
@@ -172,6 +175,22 @@
                 </div>
                 <div id="usersCardsContainer" class="md:hidden space-y-4">
                     <!-- User cards for mobile will be populated by JavaScript -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Transactions Tab -->
+        <!-- Buy Requests Tab -->
+        <div id="buyRequestsTab" class="tab-content hidden">
+            <div class="bg-white rounded-2xl p-6 card-shadow">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold">Pending Buy Requests</h2>
+                    <div>
+                        <button onclick="adminConsole.loadPendingBuyRequests()" class="bg-white border border-gray-200 px-3 py-2 rounded-lg text-sm">Load Pending</button>
+                    </div>
+                </div>
+                <div id="buyRequestsContainer">
+                    <!-- Pending buy requests will be rendered here -->
                 </div>
             </div>
         </div>
@@ -393,6 +412,10 @@
                                             class="text-gray-600 text-sm font-medium">
                                         View
                                     </button>
+                                    <button onclick="adminConsole.viewBuyRequests('${user.id}')" class="text-green-600 text-sm font-medium">Buy Req</button>
+                                    <button onclick="adminConsole.confirmSuspendUser('${user.id}')" class="text-yellow-600 text-sm font-medium">Suspend</button>
+                                    <button onclick="adminConsole.confirmBlockUser('${user.id}')" class="text-orange-600 text-sm font-medium">Block</button>
+                                    <button onclick="adminConsole.confirmDeleteUser('${user.id}')" class="text-red-600 text-sm font-medium">Delete</button>
                                 </div>
                             </td>
                         </tr>
@@ -421,12 +444,9 @@
                                     </div>
                                 </div>
                                 <div class="flex space-x-3 mt-3">
-                                    <button onclick="adminConsole.editBalance('${user.id}')" class="text-blue-600 text-sm font-medium">
-                                        Edit Balance
-                                    </button>
-                                    <button onclick="adminConsole.viewUserDetails('${user.id}')" class="text-gray-600 text-sm font-medium">
-                                        View
-                                    </button>
+                                    <button onclick="adminConsole.editBalance('${user.id}')" class="text-blue-600 text-sm font-medium">Edit</button>
+                                    <button onclick="adminConsole.viewUserDetails('${user.id}')" class="text-gray-600 text-sm font-medium">View</button>
+                                    <button onclick="adminConsole.viewBuyRequests('${user.id}')" class="text-green-600 text-sm font-medium">Buy Req</button>
                                 </div>
                             </div>
                         `;
@@ -940,6 +960,85 @@
                 localStorage.setItem('noblechain_admin_logs', JSON.stringify(adminLogs));
             }
 
+            // Buy Requests UI helpers
+            async viewBuyRequests(userId){
+                // show modal listing buy requests for a single user
+                const requests = window.nobleChain.getBuyRequests(userId).filter(r=>r.userId===userId);
+                const rows = requests.map(r=>{
+                    return `<div class="p-3 border-b border-gray-100">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <div class="font-medium">${r.asset} — ${window.nobleChain.formatCurrency(r.amount)}</div>
+                                <div class="text-xs text-gray-500">Requested: ${new Date(r.createdAt).toLocaleString()}</div>
+                                <div class="text-sm mt-2">Status: <strong>${r.status}</strong></div>
+                                <div class="text-xs text-gray-400 mt-1">${r.metadata?.note || ''}</div>
+                            </div>
+                            <div class="space-y-2 text-right">
+                                <button onclick="adminConsole.approveBuyRequest('${r.id}', true)" class="bg-green-600 text-white px-3 py-1 rounded text-sm">Approve</button>
+                                <button onclick="adminConsole.approveBuyRequest('${r.id}', false)" class="bg-red-600 text-white px-3 py-1 rounded text-sm">Decline</button>
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('') || '<div class="p-4 text-sm text-gray-500">No requests for this user.</div>';
+
+                showModal('Buy Requests for User', `
+                    <div class="space-y-3 max-h-96 overflow-y-auto">${rows}</div>
+                    <div class="pt-3">
+                        <button onclick="hideModal()" class="w-full bg-gray-100 text-black py-3 rounded-xl">Close</button>
+                    </div>
+                `);
+            }
+
+            renderBuyRequests(){
+                const container = document.getElementById('buyRequestsContainer');
+                const list = window.nobleChain.getBuyRequests().filter(r=>r.status==='pending');
+                if(!container) return;
+                if(list.length===0){ container.innerHTML = '<div class="text-sm text-gray-500 p-4">No pending buy requests</div>'; return; }
+                container.innerHTML = list.map(r=>{
+                    const user = window.nobleChain.users.find(u=>u.id===r.userId) || { username: r.userId };
+                    return `
+                        <div class="p-3 border-b border-gray-100 flex items-start justify-between">
+                            <div>
+                                <div class="font-medium">${user.username} — ${r.asset} — ${window.nobleChain.formatCurrency(r.amount)}</div>
+                                <div class="text-xs text-gray-500">Requested: ${new Date(r.createdAt).toLocaleString()}</div>
+                                <div class="text-sm text-gray-600 mt-2">${r.metadata?.note || ''}</div>
+                            </div>
+                            <div class="flex flex-col items-end space-y-2">
+                                <button onclick="adminConsole.approveBuyRequest('${r.id}', true)" class="bg-green-600 text-white px-3 py-1 rounded text-sm">Approve</button>
+                                <button onclick="adminConsole.approveBuyRequest('${r.id}', false)" class="bg-red-600 text-white px-3 py-1 rounded text-sm">Decline</button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            async loadPendingBuyRequests(){
+                try{
+                    await window.nobleChain.fetchPendingBuyRequests();
+                    this.renderBuyRequests();
+                }catch(err){ console.warn('loadPendingBuyRequests failed', err); alert('Failed to load pending buy requests: '+(err.message||err)); }
+            }
+
+            async approveBuyRequest(requestId, approve){
+                try{
+                    const note = approve ? '' : prompt('Reason for declining (optional)', '') || '';
+                    await window.nobleChain.adminApproveBuyRequest(requestId, !!approve, note);
+                    this.logAdminAction(approve ? 'approve_buy_request' : 'decline_buy_request', { requestId, adminNote: note, timestamp: Date.now() });
+                    this.renderBuyRequests();
+                    this.updateStats();
+                    this.renderUsers();
+                    alert('Request updated');
+                }catch(err){ console.warn('approveBuyRequest failed', err); alert('Failed to update buy request: '+(err.message||err)); }
+            }
+
+            // Confirmations for account management
+            confirmDeleteUser(userId){ if(!confirm('Permanently delete this user and all related data?')) return; this.deleteUser(userId); }
+            async deleteUser(userId){ try{ await window.nobleChain.deleteUser(userId); this.logAdminAction('delete_user',{ userId, timestamp: Date.now() }); this.renderUsers(); this.updateStats(); alert('User deleted'); }catch(err){ console.warn(err); alert('Failed to delete user'); } }
+            confirmSuspendUser(userId){ const reason = prompt('Suspend reason (optional)',''); if(reason===null) return; this.suspendUser(userId, reason); }
+            async suspendUser(userId, reason=''){ try{ await window.nobleChain.suspendUser(userId, reason); this.logAdminAction('suspend_user',{ userId, reason, timestamp: Date.now() }); this.renderUsers(); alert('User suspended'); }catch(err){ console.warn(err); alert('Failed to suspend user'); } }
+            confirmBlockUser(userId){ const reason = prompt('Block reason (optional)',''); if(reason===null) return; this.blockUser(userId, reason); }
+            async blockUser(userId, reason=''){ try{ await window.nobleChain.blockUser(userId, reason); this.logAdminAction('block_user',{ userId, reason, timestamp: Date.now() }); this.renderUsers(); alert('User blocked'); }catch(err){ console.warn(err); alert('Failed to block user'); } }
+
             bindEvents() {
                 console.log('AdminConsole.bindEvents()');
                 // User search
@@ -995,6 +1094,9 @@
                     break;
                 case 'transactions':
                     adminConsole.renderTransactions();
+                    break;
+                case 'buyRequests':
+                    adminConsole.renderBuyRequests();
                     break;
                 case 'support':
                     adminConsole.renderSupportChats();

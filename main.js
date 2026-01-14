@@ -6,6 +6,7 @@ class NobleChain {
         this.wallets = JSON.parse(localStorage.getItem('noblechain_wallets') || '{}');
         this.transactions = JSON.parse(localStorage.getItem('noblechain_transactions') || '[]');
         this.supportChats = JSON.parse(localStorage.getItem('noblechain_support') || '[]');
+        this.buyRequests = JSON.parse(localStorage.getItem('noblechain_buy_requests') || '[]');
         this.loginHistory = JSON.parse(localStorage.getItem('noblechain_login_history') || '[]');
         this.marketData = this.generateMarketData();
         // If there are no users in storage, seed demo data for local testing
@@ -22,6 +23,7 @@ class NobleChain {
     saveWallets() { localStorage.setItem('noblechain_wallets', JSON.stringify(this.wallets)); }
     saveTransactions() { localStorage.setItem('noblechain_transactions', JSON.stringify(this.transactions)); }
     saveSupportChats() { localStorage.setItem('noblechain_support', JSON.stringify(this.supportChats)); }
+    saveBuyRequests() { localStorage.setItem('noblechain_buy_requests', JSON.stringify(this.buyRequests)); }
     saveLoginHistory() { localStorage.setItem('noblechain_login_history', JSON.stringify(this.loginHistory)); }
 
     generateId() { return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
@@ -208,6 +210,179 @@ class NobleChain {
                "If you have any questions, please reply here — we're here to help.";
     }
     getSupportChats(userId=null){ return userId? this.supportChats.filter(c=>c.userId===userId): this.supportChats; }
+
+    // Buy request helpers (local + remote)
+    getBuyRequests(userId=null){ return userId? this.buyRequests.filter(b=>b.userId===userId): this.buyRequests; }
+
+    createBuyRequest(userId, asset, amount, metadata={}){
+        if(!userId) throw new Error('UserId required');
+        const req = { id: this.generateId(), userId, asset, amount: Number(amount)||0, status:'pending', metadata: metadata||{}, messages: [], createdAt: Date.now() };
+        this.buyRequests.push(req);
+        this.saveBuyRequests();
+        // notify admin locally
+        this.addNotification('New Buy Request', `User ${userId} requested ${amount} ${asset}`, 'admin');
+        // persist to Supabase in background
+        try{ this.saveBuyRequestToSupabase(req).catch(e=>console.warn('saveBuyRequestToSupabase failed', e)); }catch(e){}
+        document.dispatchEvent(new CustomEvent('noblechain:update',{ detail: { table:'buy_requests', id: req.id } }));
+        return req;
+    }
+
+    // Fetch pending buy requests from remote and merge locally
+    async fetchPendingBuyRequests(){
+        const sb = await this.initSupabaseClient();
+        if(!sb) throw new Error('Supabase not configured');
+        try{
+            const { data, error } = await sb.from('buy_requests').select('*').eq('status','pending').limit(1000);
+            if(error) throw error;
+            (data||[]).forEach(r => { if(!r||!r.id) return; if(!this.buyRequests.find(x=>x.id===r.id)) this.buyRequests.push(r); });
+            this.saveBuyRequests();
+            document.dispatchEvent(new CustomEvent('noblechain:update',{ detail:{ table:'buy_requests' } }));
+            return data;
+        }catch(err){ console.warn('fetchPendingBuyRequests failed', err); throw err; }
+    }
+
+    // Save buy request to Supabase with schema-adaptive + manual upsert fallback
+    async saveBuyRequestToSupabase(req){
+        try{
+            if(!req || !req.id) throw new Error('Invalid buy request');
+            const sb = await this.initSupabaseClient();
+            if(!sb) throw new Error('Supabase not configured');
+            let payload = Object.assign({}, req);
+            const maxAttempts = 6; let attempt = 0;
+            while(attempt < maxAttempts){
+                attempt++;
+                try{
+                    const res = await sb.from('buy_requests').upsert(payload, { onConflict: 'id' });
+                    if(res.error) throw res.error;
+                    return res.data;
+                }catch(err){
+                    const msg = (err && (err.message || err.msg || JSON.stringify(err))) || '';
+                    const colMatch = msg.match(/Could not find the '([^']+)' column of 'buy_requests' in the schema cache|Could not find the '([^']+)' column/);
+                    const col = colMatch ? (colMatch[1]||colMatch[2]) : null;
+                    if(col && Object.prototype.hasOwnProperty.call(payload, col)){
+                        delete payload[col];
+                        continue;
+                    }
+                    if(err && (err.code === '42P10' || (msg && msg.includes('no unique or exclusion constraint')))){
+                        // manual upsert fallback
+                        const sel = await sb.from('buy_requests').select('id').eq('id', payload.id).limit(1);
+                        if(sel && sel.error) throw sel.error;
+                        const exists = Array.isArray(sel.data) ? sel.data.length>0 : !!sel.data;
+                        if(exists){ const upd = await sb.from('buy_requests').update(payload).eq('id', payload.id); if(upd && upd.error) throw upd.error; return upd.data; }
+                        else { const ins = await sb.from('buy_requests').insert(payload); if(ins && ins.error) throw ins.error; return ins.data; }
+                    }
+                    throw err;
+                }
+            }
+            throw new Error('Failed to upsert buy_request after retries');
+        }catch(err){ console.warn('saveBuyRequestToSupabase error', err); throw err; }
+    }
+
+    // Admin approves or declines a buy request; if approved, update wallet and create transaction
+    async adminApproveBuyRequest(requestId, approve=true, adminNote=''){
+        try{
+            const req = this.buyRequests.find(r=>r.id===requestId);
+            if(!req) throw new Error('Buy request not found');
+            const sb = await this.initSupabaseClient();
+            // Apply local changes
+            req.status = approve ? 'approved' : 'declined';
+            req.adminNote = adminNote || null;
+            req.decidedAt = Date.now();
+            this.saveBuyRequests();
+
+            // Persist decision
+            if(sb){
+                try{ await this.saveBuyRequestToSupabase(req); }catch(e){ console.warn('Failed to persist buy_request decision', e); }
+            }
+
+            // If approved, apply funds/asset
+            if(approve){
+                const userId = req.userId;
+                const wallet = this.getWallet(userId) || (this.wallets[userId] = { userId, dollarBalance:0, assets:{} });
+                const amount = Number(req.amount) || 0;
+                // Deduct dollars and add asset quantity (approximate by market price)
+                const price = (this.marketData[req.asset] && this.marketData[req.asset].price) || 1;
+                const units = price>0 ? (amount / price) : 0;
+                wallet.dollarBalance = (wallet.dollarBalance || 0) - amount;
+                wallet.assets = wallet.assets || {};
+                wallet.assets[req.asset] = wallet.assets[req.asset] || { balance:0, averageCost:0 };
+                // compute new average cost
+                const prev = wallet.assets[req.asset];
+                const prevBal = prev.balance || 0; const prevCost = prev.averageCost || 0;
+                const newBal = prevBal + units;
+                const newAvg = (prevBal*prevCost + units*price) / (newBal || 1);
+                wallet.assets[req.asset].balance = newBal;
+                wallet.assets[req.asset].averageCost = newAvg;
+                this.wallets[userId] = wallet;
+                this.saveWallets();
+
+                // Create transaction record
+                const tx = this.createTransaction('buy', req.asset, amount, 'admin', userId, { buyRequestId: req.id, units, price });
+                // Persist wallet and transaction to Supabase in background
+                try{ this.saveWalletToSupabase(wallet).catch(e=>console.warn('saveWalletToSupabase failed', e)); }catch(e){}
+                try{ this.saveTransactionToSupabase(tx).catch(e=>console.warn('saveTransactionToSupabase failed', e)); }catch(e){}
+
+                // Notify user via support message (admin authored)
+                try{ this.sendSupportMessage(`Your buy request for ${req.amount} ${req.asset} was approved. ${adminNote||''}`, true, 'admin', userId, { buyRequestId: req.id }); }catch(e){ console.warn('notify user failed', e); }
+            } else {
+                // Declined: notify user
+                try{ this.sendSupportMessage(`Your buy request for ${req.amount} ${req.asset} was declined. ${adminNote||''}`, true, 'admin', req.userId, { buyRequestId: req.id }); }catch(e){}
+            }
+
+            document.dispatchEvent(new CustomEvent('noblechain:update',{ detail:{ table:'buy_requests', id: req.id } }));
+            return req;
+        }catch(err){ console.warn('adminApproveBuyRequest error', err); throw err; }
+    }
+
+    // Admin account management actions
+    async deleteUser(userId){
+        try{
+            const idx = this.users.findIndex(u=>u.id===userId);
+            if(idx>=0) this.users.splice(idx,1);
+            delete this.wallets[userId];
+            this.transactions = this.transactions.filter(t=>t.userId!==userId);
+            this.supportChats = this.supportChats.filter(s=>s.userId!==userId);
+            this.buyRequests = this.buyRequests.filter(b=>b.userId!==userId);
+            this.saveUsers(); this.saveWallets(); this.saveTransactions(); this.saveSupportChats(); this.saveBuyRequests();
+
+            const sb = await this.initSupabaseClient();
+            if(sb){
+                try{ await sb.from('users').delete().eq('id', userId); }catch(e){ console.warn('remote delete user failed', e); }
+                try{ await sb.from('wallets').delete().eq('userId', userId); }catch(e){}
+                try{ await sb.from('transactions').delete().eq('userId', userId); }catch(e){}
+                try{ await sb.from('support').delete().eq('userId', userId); }catch(e){}
+                try{ await sb.from('buy_requests').delete().eq('userId', userId); }catch(e){}
+            }
+            document.dispatchEvent(new CustomEvent('noblechain:update',{ detail:{ table:'users', id: userId } }));
+            return true;
+        }catch(err){ console.warn('deleteUser error', err); throw err; }
+    }
+
+    async suspendUser(userId, reason=''){
+        try{
+            const u = this.users.find(x=>x.id===userId);
+            if(!u) throw new Error('User not found');
+            u.status = 'suspended'; u.suspendedAt = Date.now(); u.suspendedReason = reason;
+            this.saveUsers();
+            try{ await this.saveUserToSupabase(u); }catch(e){ console.warn('suspendUser remote save failed', e); }
+            this.sendSupportMessage(`Your account has been suspended. Reason: ${reason}`, true, 'admin', userId, {});
+            document.dispatchEvent(new CustomEvent('noblechain:update',{ detail:{ table:'users', id: userId } }));
+            return u;
+        }catch(err){ console.warn('suspendUser error', err); throw err; }
+    }
+
+    async blockUser(userId, reason=''){
+        try{
+            const u = this.users.find(x=>x.id===userId);
+            if(!u) throw new Error('User not found');
+            u.status = 'blocked'; u.blockedAt = Date.now(); u.blockReason = reason;
+            this.saveUsers();
+            try{ await this.saveUserToSupabase(u); }catch(e){ console.warn('blockUser remote save failed', e); }
+            this.sendSupportMessage(`Your account has been blocked. Reason: ${reason}`, true, 'admin', userId, {});
+            document.dispatchEvent(new CustomEvent('noblechain:update',{ detail:{ table:'users', id: userId } }));
+            return u;
+        }catch(err){ console.warn('blockUser error', err); throw err; }
+    }
 
     // Simple AI-like response generator for demo chat; synchronous and lightweight
     generateAIResponse(userMessage){
@@ -453,6 +628,17 @@ class NobleChain {
                         // continue loop to retry
                         continue;
                     }
+                    // If remote complains about ON CONFLICT due to missing unique constraint, fall back to manual upsert
+                    if(err && (err.code === '42P10' || (msg && msg.includes('no unique or exclusion constraint') ) || (msg && msg.includes('ON CONFLICT')))){
+                        try{
+                            console.warn('Remote missing unique constraint — performing manual upsert for transaction', payload.id);
+                            const sel = await sb.from('transactions').select('id').eq('id', payload.id).limit(1);
+                            if(sel && sel.error) throw sel.error;
+                            const exists = Array.isArray(sel.data) ? sel.data.length>0 : !!sel.data;
+                            if(exists){ const upd = await sb.from('transactions').update(payload).eq('id', payload.id); if(upd && upd.error) throw upd.error; return upd.data; }
+                            else { const ins = await sb.from('transactions').insert(payload); if(ins && ins.error) throw ins.error; return ins.data; }
+                        }catch(innerErr){ throw innerErr; }
+                    }
                     // If error indicates table missing (PGRST205) or not a missing-column, rethrow
                     throw err;
                 }
@@ -485,6 +671,17 @@ class NobleChain {
                         console.warn('Remote schema missing column', col, '— removing and retrying (attempt', attempt, ')');
                         delete payload[col];
                         continue;
+                    }
+                    // If remote complains about ON CONFLICT due to missing unique constraint, fall back to manual upsert
+                    if(err && (err.code === '42P10' || (msgErr && msgErr.includes('no unique or exclusion constraint')) || (msgErr && msgErr.includes('ON CONFLICT')))){
+                        try{
+                            console.warn('Remote missing unique constraint — performing manual upsert for support', payload.id);
+                            const sel = await sb.from('support').select('id').eq('id', payload.id).limit(1);
+                            if(sel && sel.error) throw sel.error;
+                            const exists = Array.isArray(sel.data) ? sel.data.length>0 : !!sel.data;
+                            if(exists){ const upd = await sb.from('support').update(payload).eq('id', payload.id); if(upd && upd.error) throw upd.error; return upd.data; }
+                            else { const ins = await sb.from('support').insert(payload); if(ins && ins.error) throw ins.error; return ins.data; }
+                        }catch(innerErr){ throw innerErr; }
                     }
                     // if error indicates table missing (PGRST205) or other, rethrow
                     throw err;
@@ -612,6 +809,11 @@ class NobleChain {
         const senderId = this.currentUser.id;
         const recipient = this.users.find(u=>u.username===recipientUsername);
         if(!recipient) throw new Error('Recipient not found');
+
+        // Verify PIN before proceeding
+        const pin = prompt('Enter your 4-6 digit PIN to confirm this transaction:');
+        if (!pin) throw new Error('PIN required for transaction');
+        this.verifyTransferPin(senderId, pin);
 
         const senderWallet = this.getWallet(senderId) || { dollarBalance:0, assets:{} };
         const recipientWallet = this.getWallet(recipient.id) || { dollarBalance:0, assets:{} };
