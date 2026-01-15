@@ -410,8 +410,19 @@ class NobleChain {
                 try{
                     this.supabase = window.supabase.createClient(cfg.url, cfg.key);
                     this.supabaseConfig = cfg;
+                    console.log('Supabase client initialized from window.supabase in main.js');
                     return this.supabase;
                 }catch(err){ console.warn('Failed to create supabase client from window.supabase', err); }
+            }
+
+            // Wait for the dynamically imported supabase from index.html
+            if(window.supabase && typeof window.supabase.auth !== 'undefined'){
+                try{
+                    this.supabase = window.supabase;
+                    this.supabaseConfig = cfg;
+                    console.log('Using existing Supabase client from index.html');
+                    return this.supabase;
+                }catch(err){ console.warn('Failed to use existing supabase client', err); }
             }
 
             // Try dynamic ESM import of supabase-js if available (handles +esm CDN usage)
