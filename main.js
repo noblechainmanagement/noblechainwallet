@@ -9,10 +9,7 @@ class NobleChain {
         this.buyRequests = JSON.parse(localStorage.getItem('noblechain_buy_requests') || '[]');
         this.loginHistory = JSON.parse(localStorage.getItem('noblechain_login_history') || '[]');
         this.marketData = this.generateMarketData();
-        // If there are no users in storage, seed demo data for local testing
-        if (!this.users || this.users.length === 0) {
-            this.seedDemoData(3);
-        }
+        // Production: users are managed via Supabase authentication
         this.init();
     }
 
@@ -146,29 +143,7 @@ class NobleChain {
     }
 
     // Seed demo data for local testing when no users exist
-    seedDemoData(count = 3) {
-        for (let i = 1; i <= count; i++) {
-            const username = `demo_user_${i}`;
-            const email = `demo${i}@example.com`;
-            const password = 'password';
-            const user = {
-                id: this.generateId(),
-                email,
-                username,
-                passwordHash: this.hashPassword(password),
-                createdAt: Date.now() - i * 86400000,
-                lastLogin: Date.now() - i * 3600000,
-                hasLoggedInBefore: true
-            };
-            this.users.push(user);
-            this.wallets[user.id] = { userId: user.id, dollarBalance: 1000 * i, assets: { 'BTC': { balance: 0.01 * i, averageCost: 40000 } } };
-            this.transactions.push({ id: this.generateId(), userId: user.id, type: 'receive', asset: 'USD', amount: 1000 * i, timestamp: Date.now() - i * 3600000, status: 'completed' });
-        }
-        this.saveUsers();
-        this.saveWallets();
-        this.saveTransactions();
-        console.log(`Seeded ${count} demo users for NobleChain.`);
-    }
+    // Production: demo data seeding removed - user registration is handled by Supabase authentication
 
     // Support: send a support message. If user sends and no admin online, auto-reply with AI.
     // signature: sendSupportMessage(message, isAdmin=false, senderType='user', userId=null, metadata={})

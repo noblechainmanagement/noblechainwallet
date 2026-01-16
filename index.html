@@ -170,7 +170,7 @@
   // Minimal nobleChain object (kept for compatibility)
   window.nobleChain = {
       adminUsers: [{ username: "admin", password: "noblechain2024" }],
-      login: function(email, password){ alert('Demo login not implemented.'); },
+      login: function(email, password){ console.error('Direct login not implemented - use Supabase auth'); }
   };
 
   // Admin login function (standalone)
@@ -218,67 +218,15 @@
   }
 
   // Fallback signup for when Supabase is not available
-  function fallbackSignup(email, password, username, pin) {
-      console.log('Using fallback signup (local only)');
-
-      // Create user locally
-      const userId = 'local_' + Date.now().toString(36);
-      const user = {
-          id: userId,
-          email,
-          username,
-          createdAt: Date.now(),
-          lastLogin: Date.now()
-      };
-
-      // Store user locally
-      try {
-          const users = JSON.parse(localStorage.getItem('noblechain_users') || '[]');
-          if (!users.find(u => u.email === email)) {
-              users.push(user);
-              localStorage.setItem('noblechain_users', JSON.stringify(users));
-          }
-
-          // Create wallet
-          const wallets = JSON.parse(localStorage.getItem('noblechain_wallets') || '{}');
-          if (!wallets[userId]) {
-              wallets[userId] = { userId, dollarBalance: 0, assets: {} };
-              localStorage.setItem('noblechain_wallets', JSON.stringify(wallets));
-          }
-
-          // Set PIN
-          const pins = JSON.parse(localStorage.getItem('noblechain_pins') || '{}');
-          pins[userId] = { userId, pinHash: null, mustSetPin: true, createdAt: Date.now() };
-          localStorage.setItem('noblechain_pins', JSON.stringify(pins));
-
-          if (window.NobleChain) {
-              const nc = new window.NobleChain();
-              nc.setTransferPin(userId, pin);
-          }
-
-          // Set session
-          localStorage.setItem('noblechain_session', JSON.stringify({ userId, timestamp: Date.now() }));
-          localStorage.setItem('noblechain_current_username', username);
-
-          alert('Account created successfully! (Using local storage - Supabase not available)');
-          return true;
-      } catch (err) {
-          console.error('Fallback signup failed:', err);
-          alert('Signup failed: ' + err.message);
-          return false;
-      }
-  }
+  // Production: All authentication is handled through Supabase
 
   // Signup handler using Supabase
   async function handleSignup(email, password, username, pin) {
       console.log('Starting signup process for:', email);
 
       if (!isAnonKeyConfigured()) {
-          console.log('Supabase not configured, using fallback');
-          const success = fallbackSignup(email, password, username, pin);
-          if (success) {
-              proceedToRecoveryPhrase(username);
-          }
+          console.error('Supabase not configured');
+          alert('Unable to create account: Supabase authentication is not configured.');
           return;
       }
 
@@ -305,46 +253,16 @@
           if (error) {
               console.error('Signup error details:', error);
 
-              // Check if it's an email confirmation error (common in dev environments)
+              // Handle email confirmation errors
               if (error.message?.includes('Error sending confirmation email') ||
                   error.message?.includes('confirmation email')) {
-                  console.log('Email confirmation error detected - treating as successful signup for demo purposes');
-                  alert('Account created successfully! (Email confirmation disabled for demo)\n\nNote: In production, you would receive a confirmation email.');
-
-                  // Create a mock user object for the flow to continue
-                  const mockUser = {
-                      id: 'demo_' + Date.now().toString(36),
-                      email: email,
-                      user_metadata: { username: username }
-                  };
-
-                  // Continue with the normal flow using mock data
-                  const createdUserId = mockUser.id;
-                  const createdUsername = username || mockUser.user_metadata?.username || mockUser.email || 'User';
-
-                  // Store user info locally for demo
-                  localStorage.setItem('noblechain_demo_user', JSON.stringify({
-                      id: createdUserId,
-                      email: email,
-                      username: createdUsername,
-                      createdAt: new Date().toISOString()
-                  }));
-
-                  proceedToRecoveryPhrase(createdUsername);
+                  console.error('Email confirmation failed');
+                  alert('Unable to send confirmation email. Please contact support.');
                   return;
               }
 
-              // If it's a server error (500), try fallback
-              if (error.status === 500 || error.message?.includes('500') || error.message?.includes('Internal Server Error')) {
-                  console.log('Supabase server error, trying fallback signup...');
-                  alert('Supabase is currently unavailable (500 error). Creating account locally instead.');
-                  const success = fallbackSignup(email, password, username, pin);
-                  if (success) {
-                      proceedToRecoveryPhrase(username);
-                  }
-              } else {
-                  alert('Signup error: ' + error.message + '\n\nError code: ' + (error.status || 'Unknown'));
-              }
+              console.error('Supabase signup failed:', error.message);
+              alert('Signup error: ' + error.message + '\n\nError code: ' + (error.status || 'Unknown'));
               return;
           }
 
@@ -467,28 +385,8 @@
 
           if (error) {
               console.warn('Supabase login failed:', error);
-
-              // Try demo login fallback
-              const demoUser = JSON.parse(localStorage.getItem('noblechain_demo_user') || 'null');
-              if (demoUser && demoUser.email === email) {
-                  console.log('Using demo login fallback');
-                  alert('Login successful! (Demo mode - Supabase auth bypassed)');
-
-                  // Set up the user session
-                  const loginUsername = demoUser.username || demoUser.email || 'User';
-                  window.nobleChain = window.nobleChain || {};
-                  window.nobleChain.currentUser = { id: demoUser.id, username: loginUsername };
-
-                  localStorage.setItem('noblechain_session', JSON.stringify({ userId: demoUser.id, timestamp: Date.now() }));
-                  localStorage.setItem('noblechain_current_username', loginUsername);
-
-                  // Redirect to dashboard
-                  window.location.href = 'dashboard.html';
-                  return;
-              }
-
-              alert('Login error: ' + error.message)
-              return
+              alert('Login error: ' + error.message);
+              return;
           }
 
           // Set local session so the dashboard UI can display the username
@@ -509,7 +407,7 @@
                   wallets[userIdKey] = { userId: userIdKey, dollarBalance: 0, assets: {} };
                   localStorage.setItem('noblechain_wallets', JSON.stringify(wallets));
               }
-          } catch (e) { console.warn('Failed to persist local demo login user', e); }
+          } catch (e) { console.error('Failed to persist login user data', e); }
           localStorage.setItem('noblechain_session', JSON.stringify({ userId: window.nobleChain.currentUser.id, timestamp: Date.now() }));
           localStorage.setItem('noblechain_current_username', loginUsername);
 
@@ -678,11 +576,7 @@
   async function handleForgotPassword(email) {
       console.log('handleForgotPassword called with email:', email);
 
-      // For demo purposes, since Supabase email may not be configured
-      // Show a message that password reset would be sent
-      alert(`Password reset requested for: ${email}\n\nIn a production app, a reset link would be sent to this email address.\n\nFor this demo, please contact support to reset your password.`);
-
-      // Try Supabase reset anyway (may fail if email not configured)
+      // Use Supabase reset if configured
       if (isAnonKeyConfigured()) {
           try {
               console.log('Attempting Supabase password reset...');
@@ -693,14 +587,18 @@
               console.log('Supabase response:', { data, error });
 
               if (error) {
-                  console.warn('Supabase reset failed (expected if email not configured):', error.message);
-                  // Don't show error to user since we already showed the demo message
+                  console.error('Supabase reset failed:', error.message);
+                  alert('Password reset failed: ' + error.message);
               } else {
-                  console.log('Supabase reset email sent successfully');
+                  console.log('Password reset email sent successfully');
+                  alert('If an account exists with that email address, a password reset link has been sent.');
               }
           } catch (err) {
-              console.warn('Supabase reset error:', err);
+              console.error('Supabase reset error:', err);
+              alert('Password reset service unavailable. Please contact support.');
           }
+      } else {
+          alert('Password reset service is unavailable. Please contact support.');
       }
 
       showSection('loginSection');
