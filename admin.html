@@ -1090,22 +1090,24 @@
             document.getElementById(tabName + 'Tab').classList.remove('hidden');
             
             // Render appropriate content
-            switch(tabName) {
-                case 'users':
-                    adminConsole.renderUsers();
-                    break;
-                case 'transactions':
-                    adminConsole.renderTransactions();
-                    break;
-                case 'buyRequests':
-                    adminConsole.renderBuyRequests();
-                    break;
-                case 'support':
-                    adminConsole.renderSupportChats();
-                    break;
-                case 'logs':
-                    adminConsole.renderAdminLogs();
-                    break;
+            if (adminConsole) {
+                switch(tabName) {
+                    case 'users':
+                        adminConsole.renderUsers();
+                        break;
+                    case 'transactions':
+                        adminConsole.renderTransactions();
+                        break;
+                    case 'buyRequests':
+                        adminConsole.renderBuyRequests();
+                        break;
+                    case 'support':
+                        adminConsole.renderSupportChats();
+                        break;
+                    case 'logs':
+                        adminConsole.renderAdminLogs();
+                        break;
+                }
             }
         }
 
