@@ -389,7 +389,7 @@
                 }
 
                 container.innerHTML = users.map(user => {
-                    const wallet = window.nobleChain.getWallet(user.id);
+                    const wallet = window.nobleChain.getWallet(user.id) || { assets: {}, dollarBalance: 0 };
                     const totalBalance = window.nobleChain.getTotalBalance(user.id);
                     const assetCount = Object.keys(wallet.assets).length;
                     
@@ -426,7 +426,7 @@
                 const usersCards = document.getElementById('usersCardsContainer');
                 if (usersCards) {
                     usersCards.innerHTML = users.map(user => {
-                        const wallet = window.nobleChain.getWallet(user.id);
+                        const wallet = window.nobleChain.getWallet(user.id) || { assets: {}, dollarBalance: 0 };
                         const totalBalance = window.nobleChain.getTotalBalance(user.id);
                         const assetCount = Object.keys(wallet.assets).length;
 
@@ -854,7 +854,7 @@
 
             viewUserDetails(userId) {
                 const user = window.nobleChain.users.find(u => u.id === userId);
-                const wallet = window.nobleChain.getWallet(userId);
+                const wallet = window.nobleChain.getWallet(userId) || { assets: {}, dollarBalance: 0 };
                 
                 showModal('User Details', `
                     <div class="space-y-4">
@@ -1066,7 +1066,9 @@
         // Global functions
         function switchTab(evt, tabName) {
             console.log('switchTab called', tabName, evt);
-            adminConsole.currentTab = tabName;
+            if (adminConsole) {
+                adminConsole.currentTab = tabName;
+            }
 
             // Update tab buttons
             document.querySelectorAll('.tab-btn').forEach(btn => {
